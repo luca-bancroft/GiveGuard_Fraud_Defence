@@ -1,14 +1,15 @@
 from fastapi import APIRouter
-from models.schemas import OrgSubmission
+from models.schemas import OrgSubmission, VerifyResponse
+from typing import List
 
 router = APIRouter()
 
 submissions = []
 
-@router.post("/verify")
+@router.post("/verify", response_model=VerifyResponse)
 def verify(submission: OrgSubmission):
-    # Mock response — swap this out for Mushfiq's scorer later
     mock_result = {
+        # - Mock response
         "ein": submission.ein,
         "org_name": submission.org_name,
         "trust_score": 8,
