@@ -8,6 +8,7 @@ import httpx
 from scoring.irs_client import fetch_propublica_organization, looks_like_ein, normalize_ein
 
 
+DUCKDUCKGO_URL = "https://api.duckduckgo.com/"
 GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -104,6 +105,45 @@ def _verdict_from_signals(trust_score: int, signal_count: int) -> str:
 	return "flagged"
 
 
+def _fetch_osint_lookup(org_name: str) -> dict[str, Any]:
+	query = (org_name or "").strip()
+	if not query:
+		return {
+			"query": query,
+			"has_web_presence": False,
+			"sources_found": 0,
+		}
+
+	try:
+		resp = httpx.get(
+			DUCKDUCKGO_URL,
+			params={"q": query, "format": "json"},
+			timeout=12.0,
+		)
+		resp.raise_for_status()
+		data = resp.json()
+
+		abstract_url = str(data.get("AbstractURL") or "").strip()
+		related_topics = data.get("RelatedTopics") if isinstance(data.get("RelatedTopics"), list) else []
+		results = data.get("Results") if isinstance(data.get("Results"), list) else []
+		heading = str(data.get("Heading") or "").strip()
+
+		sources_found = (1 if abstract_url else 0) + len(related_topics) + len(results)
+		has_presence = bool(abstract_url or related_topics or results or heading)
+
+		return {
+			"query": query,
+			"has_web_presence": has_presence,
+			"sources_found": sources_found,
+		}
+	except Exception:
+		return {
+			"query": query,
+			"has_web_presence": False,
+			"sources_found": 0,
+		}
+
+
 def _build_explanation(payload: dict[str, Any]) -> str:
 	gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
 	if gemini_key:
@@ -118,6 +158,8 @@ def _build_explanation(payload: dict[str, Any]) -> str:
 			"verdict": payload.get("verdict"),
 			"signals": payload.get("signals"),
 			"irs_lookup": payload.get("irs_lookup"),
+			"osint_lookup": payload.get("osint_lookup"),
+			"policy": "No single signal should be treated as enough to block by itself.",
 		}
 
 		body = {
@@ -172,9 +214,9 @@ def _build_explanation(payload: dict[str, Any]) -> str:
 
 	flag_text = ", ".join(signal["flag"] for signal in payload["signals"][:4])
 	return (
-		f"IRS-based scoring flagged: {flag_text}. "
+		f"Risk signals triggered: {flag_text}. "
 		f"Trust score: {payload['trust_score']}/100. "
-		"AI narrative analysis is planned as a future enhancement."
+		"AI explanation unavailable; using deterministic scoring summary."
 	)
 
 
@@ -202,6 +244,17 @@ def score_submission(ein: str, org_name: str) -> dict[str, Any]:
 		)
 
 	irs_lookup = _build_irs_lookup(irs_org)
+	lookup_name = (org_name or "").strip() or (irs_org or {}).get("name") or cleaned_ein
+
+	osint_lookup = _fetch_osint_lookup(lookup_name)
+	if not osint_lookup["has_web_presence"]:
+		signals.append(
+			{
+				"flag": "No web presence found via OSINT",
+				"risk_points": 15,
+			}
+		)
+
 	if irs_lookup["ein_exists"]:
 		if _is_recent_org(irs_lookup["ruling_date"], days=30):
 			signals.append({"flag": "Registered less than 30 days ago", "risk_points": 40})
@@ -211,8 +264,6 @@ def score_submission(ein: str, org_name: str) -> dict[str, Any]:
 			signals.append({"flag": "NTEE category mismatch", "risk_points": 20})
 		if _is_high_risk_state(irs_lookup.get("state")):
 			signals.append({"flag": "High-risk state of incorporation", "risk_points": 10})
-
-	lookup_name = (org_name or "").strip() or (irs_org or {}).get("name") or cleaned_ein
 
 	total_risk = sum(signal["risk_points"] for signal in signals)
 	trust_score = max(0, 100 - total_risk)
@@ -226,6 +277,7 @@ def score_submission(ein: str, org_name: str) -> dict[str, Any]:
 		"signals": signals,
 		"top_flag": signals[0]["flag"] if signals else None,
 		"irs_lookup": irs_lookup,
+		"osint_lookup": osint_lookup,
 	}
 	payload["ai_explanation"] = _build_explanation(payload)
 	return payload
