@@ -96,10 +96,13 @@ def _is_high_risk_state(state: str | None) -> bool:
 	return state.strip().upper() in {"DE", "NV", "WY"}
 
 
-def _verdict_from_signals(trust_score: int, signal_count: int) -> str:
+def _verdict_from_signals(trust_score: int, signal_count: int, max_signal_risk: int) -> str:
 	# Important guardrail: a single signal cannot directly block an organization.
 	if signal_count >= 2 and trust_score < 40:
 		return "blocked"
+	# Avoid over-penalizing orgs when only one low-confidence signal fired.
+	if signal_count == 1 and max_signal_risk <= 15 and trust_score >= 70:
+		return "verified"
 	if trust_score >= 75 and signal_count == 0:
 		return "verified"
 	return "flagged"
@@ -244,7 +247,17 @@ def score_submission(ein: str, org_name: str) -> dict[str, Any]:
 		)
 
 	irs_lookup = _build_irs_lookup(irs_org)
-	lookup_name = (org_name or "").strip() or (irs_org or {}).get("name") or cleaned_ein
+	user_org_name = (org_name or "").strip()
+	irs_org_name = ((irs_org or {}).get("name") or "").strip()
+	if user_org_name:
+		lookup_name = user_org_name
+	elif irs_org_name:
+		lookup_name = irs_org_name
+	elif is_ein_input:
+		normalized = normalize_ein(cleaned_ein)
+		lookup_name = f"Unknown organization (EIN {normalized})"
+	else:
+		lookup_name = cleaned_ein
 
 	osint_lookup = _fetch_osint_lookup(lookup_name)
 	if not osint_lookup["has_web_presence"]:
@@ -259,15 +272,16 @@ def score_submission(ein: str, org_name: str) -> dict[str, Any]:
 		if _is_recent_org(irs_lookup["ruling_date"], days=30):
 			signals.append({"flag": "Registered less than 30 days ago", "risk_points": 40})
 		if not irs_lookup["filing_990"]:
-			signals.append({"flag": "No IRS 990 filing on record", "risk_points": 30})
+			signals.append({"flag": "No IRS 990 filing on record", "risk_points": 12})
 		if _ntee_mismatch(org_name, irs_lookup["ntee_code"]):
-			signals.append({"flag": "NTEE category mismatch", "risk_points": 20})
+			signals.append({"flag": "NTEE category mismatch", "risk_points": 10})
 		if _is_high_risk_state(irs_lookup.get("state")):
 			signals.append({"flag": "High-risk state of incorporation", "risk_points": 10})
 
 	total_risk = sum(signal["risk_points"] for signal in signals)
 	trust_score = max(0, 100 - total_risk)
-	verdict = _verdict_from_signals(trust_score, len(signals))
+	max_signal_risk = max((signal["risk_points"] for signal in signals), default=0)
+	verdict = _verdict_from_signals(trust_score, len(signals), max_signal_risk)
 
 	payload = {
 		"ein": normalize_ein(cleaned_ein) if is_ein_input else cleaned_ein,

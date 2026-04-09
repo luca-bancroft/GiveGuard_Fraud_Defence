@@ -5,6 +5,9 @@
 ## Frontend
 **npm install**  
 **npm run dev**  
+
+## Run Both Together
+**npm run dev:all**
   
 ## Backend
 **cd backend**  
