@@ -76,15 +76,6 @@
 
 ---
 
-## Who owns what
-
-| Endpoint         | Built by   | Consumed by |
-|------------------|------------|-------------|
-| POST /verify     | Sri        | Luca        |
-| GET /submissions | Sri        | Luca        |
-| Scoring logic    | Mushfiq    | Sri         
-
-
 ## Error responses
 
 If the EIN is invalid or the IRS API fails, the backend returns:
