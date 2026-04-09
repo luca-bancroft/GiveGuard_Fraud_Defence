@@ -11,6 +11,8 @@
 **python3 -m venv venv**  
 **source venv/bin/activate**  
 **pip3 install -r requirements.txt**  
+**copy .env.example .env**  
+**set GEMINI_API_KEY in .env**  
 **uvicorn main:app --reload**  
   
 ## Scoring
