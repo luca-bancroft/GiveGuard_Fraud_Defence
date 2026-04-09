@@ -27,6 +27,8 @@
     { "flag": "NTEE category mismatch",            "risk_points": 20 },
     { "flag": "High-risk state of incorporation",  "risk_points": 10 }
   ],
+  "top_flag": "Registered less than 30 days ago",
+  "ai_explanation": "Veterans Hope Relief Fund claims to support military families but is registered under a general fundraising category, incorporated 18 days ago in Delaware, has no web presence, and filed no 990. Trust score: 6/100. Recommend blocking until documentation is provided.",
   "irs_lookup": {
     "ein_exists": true,
     "active_status": "Pending",
